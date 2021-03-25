@@ -13,15 +13,18 @@ import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.Environment;
-import io.strimzi.systemtest.resources.KubernetesResource;
-import io.strimzi.systemtest.resources.ResourceManager;
-import io.strimzi.systemtest.resources.crd.KafkaConnectResource;
-import io.strimzi.systemtest.resources.crd.KafkaConnectorResource;
+import io.strimzi.systemtest.annotations.IsolatedTest;
 import io.strimzi.systemtest.resources.crd.KafkaRebalanceResource;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
-import io.strimzi.systemtest.resources.crd.KafkaTopicResource;
 import io.strimzi.systemtest.resources.crd.kafkaclients.KafkaBasicExampleClients;
+import io.strimzi.systemtest.resources.kubernetes.ClusterRoleBindingResource;
 import io.strimzi.systemtest.resources.operator.BundleResource;
+import io.strimzi.systemtest.templates.crd.KafkaConnectTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaConnectorTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaRebalanceTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
+import io.strimzi.systemtest.templates.kubernetes.ClusterRoleBindingTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaConnectUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaRebalanceUtils;
@@ -33,7 +36,7 @@ import org.apache.logging.log4j.Logger;
 import static org.hamcrest.CoreMatchers.is;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.util.Collections;
 import java.util.List;
@@ -43,6 +46,7 @@ import static io.strimzi.systemtest.Constants.REGRESSION;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @Tag(REGRESSION)
@@ -63,18 +67,24 @@ public class MultipleClusterOperatorsST extends AbstractST {
     public static final Map<String, String> FIRST_CO_SELECTOR = Collections.singletonMap("app.kubernetes.io/operator", FIRST_CO_NAME);
     public static final Map<String, String> SECOND_CO_SELECTOR = Collections.singletonMap("app.kubernetes.io/operator", SECOND_CO_NAME);
 
-    @Test
-    void testMultipleCOsInDifferentNamespaces() {
+    @IsolatedTest
+    void testMultipleCOsInDifferentNamespaces(ExtensionContext extensionContext) {
+        // TODO issue #4152 - temporarily disabled for Namespace RBAC scoped
+        assumeFalse(Environment.isNamespaceRbacScope());
+
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+        String topicName = mapWithTestTopics.get(extensionContext.getDisplayName());
+
         String producerName = "hello-world-producer";
         String consumerName = "hello-world-consumer";
 
-        deployCOInNamespace(FIRST_CO_NAME, FIRST_NAMESPACE, FIRST_CO_SELECTOR_ENV, true);
-        deployCOInNamespace(SECOND_CO_NAME, SECOND_NAMESPACE, SECOND_CO_SELECTOR_ENV, true);
+        deployCOInNamespace(extensionContext, FIRST_CO_NAME, FIRST_NAMESPACE, FIRST_CO_SELECTOR_ENV, true);
+        deployCOInNamespace(extensionContext, SECOND_CO_NAME, SECOND_NAMESPACE, SECOND_CO_SELECTOR_ENV, true);
 
         cluster.setNamespace(DEFAULT_NAMESPACE);
 
         LOGGER.info("Deploying Kafka without CR selector");
-        KafkaResource.kafkaWithoutWait(KafkaResource.kafkaEphemeral(clusterName, 3, 3).build());
+        resourceManager.createResource(extensionContext, false, KafkaTemplates.kafkaEphemeral(clusterName, 3, 3).build());
 
         // checking that no pods with prefix 'clusterName' will be created in some time
         PodUtils.waitUntilPodStabilityReplicasCount(clusterName, 0);
@@ -83,19 +93,19 @@ public class MultipleClusterOperatorsST extends AbstractST {
         KafkaResource.replaceKafkaResource(clusterName, kafka -> kafka.getMetadata().setLabels(FIRST_CO_SELECTOR));
         KafkaUtils.waitForKafkaReady(clusterName);
 
-        KafkaTopicResource.createAndWaitForReadiness(KafkaTopicResource.topic(clusterName, TOPIC_NAME).build());
+        resourceManager.createResource(extensionContext,
+            KafkaTopicTemplates.topic(clusterName, topicName).build(),
+            KafkaConnectTemplates.kafkaConnect(extensionContext, clusterName, 1, false)
+                .editOrNewMetadata()
+                    .addToLabels(FIRST_CO_SELECTOR)
+                    .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                .endMetadata()
+                .build());
 
-        KafkaConnectResource.createAndWaitForReadiness(KafkaConnectResource.kafkaConnect(clusterName, 1)
-            .editOrNewMetadata()
-                .addToLabels(FIRST_CO_SELECTOR)
-                .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-            .endMetadata()
-            .build(), false);
-
-        String kafkaConnectPodName = kubeClient().listPods(Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND).get(0).getMetadata().getName();
+        String kafkaConnectPodName = kubeClient().listPods(clusterName, Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND).get(0).getMetadata().getName();
 
         LOGGER.info("Deploying KafkaConnector with file sink and CR selector - {} - different than selector in Kafka", SECOND_CO_SELECTOR);
-        KafkaConnectorResource.createAndWaitForReadiness(KafkaConnectorResource.kafkaConnector(clusterName)
+        resourceManager.createResource(extensionContext, KafkaConnectorTemplates.kafkaConnector(clusterName)
             .editOrNewMetadata()
                 .addToLabels(SECOND_CO_SELECTOR)
             .endMetadata()
@@ -104,7 +114,7 @@ public class MultipleClusterOperatorsST extends AbstractST {
                 .addToConfig("file", Constants.DEFAULT_SINK_FILE_PATH)
                 .addToConfig("key.converter", "org.apache.kafka.connect.storage.StringConverter")
                 .addToConfig("value.converter", "org.apache.kafka.connect.storage.StringConverter")
-                .addToConfig("topics", TOPIC_NAME)
+                .addToConfig("topics", topicName)
             .endSpec()
             .build());
 
@@ -112,25 +122,27 @@ public class MultipleClusterOperatorsST extends AbstractST {
             .withProducerName(producerName)
             .withConsumerName(consumerName)
             .withBootstrapAddress(KafkaResources.plainBootstrapAddress(clusterName))
-            .withTopicName(TOPIC_NAME)
+            .withTopicName(topicName)
             .withMessageCount(MESSAGE_COUNT)
             .build();
 
-        basicClients.createAndWaitForReadiness(basicClients.producerStrimzi().build());
+        resourceManager.createResource(extensionContext, basicClients.producerStrimzi().build());
         ClientUtils.waitForClientSuccess(producerName, DEFAULT_NAMESPACE, MESSAGE_COUNT);
 
         KafkaConnectUtils.waitForMessagesInKafkaConnectFileSink(kafkaConnectPodName, Constants.DEFAULT_SINK_FILE_PATH, "Hello-world - 99");
     }
 
-    @Test
-    void testKafkaCCAndRebalanceWithMultipleCOs() {
+    @IsolatedTest
+    void testKafkaCCAndRebalanceWithMultipleCOs(ExtensionContext extensionContext) {
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
         int scaleTo = 4;
 
-        deployCOInNamespace(FIRST_CO_NAME, DEFAULT_NAMESPACE, FIRST_CO_SELECTOR_ENV, false);
-        deployCOInNamespace(SECOND_CO_NAME, DEFAULT_NAMESPACE, SECOND_CO_SELECTOR_ENV, false);
+        deployCOInNamespace(extensionContext, FIRST_CO_NAME, DEFAULT_NAMESPACE, FIRST_CO_SELECTOR_ENV, false);
+        deployCOInNamespace(extensionContext, SECOND_CO_NAME, DEFAULT_NAMESPACE, SECOND_CO_SELECTOR_ENV, false);
 
         LOGGER.info("Deploying Kafka with {} selector of {}", FIRST_CO_SELECTOR, FIRST_CO_NAME);
-        KafkaResource.createAndWaitForReadiness(KafkaResource.kafkaWithCruiseControl(clusterName, 3, 3)
+
+        resourceManager.createResource(extensionContext, KafkaTemplates.kafkaWithCruiseControl(clusterName, 3, 3)
             .editOrNewMetadata()
                 .addToLabels(FIRST_CO_SELECTOR)
             .endMetadata()
@@ -146,7 +158,7 @@ public class MultipleClusterOperatorsST extends AbstractST {
         // to test if KR will be ignored
 
         LOGGER.info("Creating KafkaRebalance when CC doesn't have label for CO, the KR should be ignored");
-        KafkaRebalanceResource.kafkaRebalanceWithoutWait(KafkaRebalanceResource.kafkaRebalance(clusterName).build());
+        resourceManager.createResource(extensionContext, false, KafkaRebalanceTemplates.kafkaRebalance(clusterName).build());
 
         KafkaUtils.waitForClusterStability(clusterName);
 
@@ -166,24 +178,24 @@ public class MultipleClusterOperatorsST extends AbstractST {
         KafkaRebalanceUtils.doRebalancingProcess(clusterName);
     }
 
-    void deployCOInNamespace(String coName, String coNamespace, EnvVar selectorEnv, boolean multipleNamespaces) {
+    void deployCOInNamespace(ExtensionContext extensionContext, String coName, String coNamespace, EnvVar selectorEnv, boolean multipleNamespaces) {
         String namespace = multipleNamespaces ? "*" : coNamespace;
 
         if (multipleNamespaces) {
-            prepareEnvForOperator(coNamespace);
+            prepareEnvForOperator(extensionContext, coNamespace);
 
             // Apply rolebindings in CO namespace
-            applyBindings(coNamespace);
+            applyBindings(extensionContext, coNamespace);
 
             // Create ClusterRoleBindings that grant cluster-wide access to all OpenShift projects
-            List<ClusterRoleBinding> clusterRoleBindingList = KubernetesResource.clusterRoleBindingsForAllNamespaces(coNamespace, coName);
-            clusterRoleBindingList.forEach(KubernetesResource::clusterRoleBinding);
+            List<ClusterRoleBinding> clusterRoleBindingList = ClusterRoleBindingTemplates.clusterRoleBindingsForAllNamespaces(coNamespace, coName);
+            clusterRoleBindingList.forEach(
+                clusterRoleBinding -> ClusterRoleBindingResource.clusterRoleBinding(extensionContext, clusterRoleBinding));
         }
-
 
         LOGGER.info("Creating {} in {} namespace", coName, coNamespace);
 
-        BundleResource.createAndWaitForReadiness(BundleResource.clusterOperator(namespace)
+        resourceManager.createResource(extensionContext, BundleResource.clusterOperator(coNamespace, namespace, Constants.RECONCILIATION_INTERVAL)
             .editOrNewMetadata()
                 .withName(coName)
             .endMetadata()
@@ -206,10 +218,9 @@ public class MultipleClusterOperatorsST extends AbstractST {
     }
 
     @BeforeAll
-    void setup() {
+    void setup(ExtensionContext extensionContext) {
         assumeTrue(!Environment.isHelmInstall() && !Environment.isOlmInstall());
-        ResourceManager.setClassResources();
-        prepareEnvForOperator(DEFAULT_NAMESPACE);
-        applyBindings(DEFAULT_NAMESPACE);
+        prepareEnvForOperator(extensionContext, DEFAULT_NAMESPACE);
+        applyBindings(extensionContext, DEFAULT_NAMESPACE);
     }
 }

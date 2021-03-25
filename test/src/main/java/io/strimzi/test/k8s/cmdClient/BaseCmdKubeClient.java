@@ -98,6 +98,28 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
 
     @Override
     @SuppressWarnings("unchecked")
+    public K create(File file) {
+        Exec.exec(null, namespacedCommand(CREATE, "-f", file.getAbsolutePath()), 0, false, true);
+
+        return (K) this;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public K createOrReplace(File file) {
+        try (Context context = defaultContext()) {
+            try {
+                create(file);
+            } catch (KubeClusterException.AlreadyExists e) {
+                Exec.exec(null, namespacedCommand(REPLACE, "-f", file.getAbsolutePath()), 0, false);
+            }
+
+            return (K) this;
+        }
+    }
+    
+    @Override
+    @SuppressWarnings("unchecked")
     public K create(File... files) {
         try (Context context = defaultContext()) {
             Map<File, ExecResult> execResults = execRecursive(CREATE, files, Comparator.comparing(File::getName).reversed());
@@ -180,7 +202,7 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     @SuppressWarnings("unchecked")
     public K applyContent(String yamlContent) {
         try (Context context = defaultContext()) {
-            Exec.exec(yamlContent, namespacedCommand(APPLY, "-f", "-"));
+            Exec.exec(yamlContent, namespacedCommand(APPLY, "-f", "-"), 0, true);
             return (K) this;
         }
     }
@@ -189,7 +211,7 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     @SuppressWarnings("unchecked")
     public K createContent(String yamlContent) {
         try (Context context = defaultContext()) {
-            Exec.exec(yamlContent, namespacedCommand(CREATE, "-f", "-"));
+            Exec.exec(yamlContent, namespacedCommand(CREATE, "-f", "-"), 0, true);
             return (K) this;
         }
     }
@@ -201,7 +223,7 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
             try {
                 createContent(yamlContent);
             } catch (KubeClusterException.AlreadyExists e) {
-                Exec.exec(yamlContent, namespacedCommand(REPLACE, "-f", "-"));
+                Exec.exec(yamlContent, namespacedCommand(REPLACE, "-f", "-"), 0, true);
             }
 
             return (K) this;
@@ -221,7 +243,7 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     @SuppressWarnings("unchecked")
     public K createNamespace(String name) {
         try (Context context = adminContext()) {
-            Exec.exec(namespacedCommand(CREATE, "namespace", name));
+            Exec.exec(null, namespacedCommand(CREATE, "namespace", name), 0, true);
         }
         return (K) this;
     }
@@ -402,7 +424,7 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     }
 
     @Override
-    public void createResourceAndApply(String template, Map<String, String> params) {
+    synchronized public void createResourceAndApply(String template, Map<String, String> params) {
         List<String> cmd = namespacedCommand("process", template, "-l", "app=" + template, "-o", "yaml");
         for (Map.Entry<String, String> entry : params.entrySet()) {
             cmd.add("-p");

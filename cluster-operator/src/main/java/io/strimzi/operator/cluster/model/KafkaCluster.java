@@ -22,7 +22,6 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServicePort;
-import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeBuilder;
 import io.fabric8.kubernetes.api.model.VolumeMount;
@@ -602,10 +601,6 @@ public class KafkaCluster extends AbstractModel {
             ModelUtils.parsePodDisruptionBudgetTemplate(result, template.getPodDisruptionBudget());
         }
 
-        // Kafka Cluster needs special treatment for Affinity and Tolerations because of deprecated fields in spec
-        result.setUserAffinity(affinity(kafkaClusterSpec));
-        result.setTolerations(tolerations(kafkaClusterSpec));
-
         result.kafkaVersion = versions.version(kafkaClusterSpec.getVersion());
         return result;
     }
@@ -699,25 +694,6 @@ public class KafkaCluster extends AbstractModel {
             } catch (NumberFormatException e) {
                 throw new InvalidResourceException("Property " + propertyName + " should be an integer");
             }
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    static List<Toleration> tolerations(KafkaClusterSpec kafkaClusterSpec) {
-        return ModelUtils.tolerations("spec.kafka.tolerations", kafkaClusterSpec.getTolerations(), "spec.kafka.template.pod.tolerations", kafkaClusterSpec.getTemplate() == null ? null : kafkaClusterSpec.getTemplate().getPod());
-    }
-
-    @SuppressWarnings("deprecation")
-    static Affinity affinity(KafkaClusterSpec kafkaClusterSpec) {
-        if (kafkaClusterSpec.getTemplate() != null
-                && kafkaClusterSpec.getTemplate().getPod() != null
-                && kafkaClusterSpec.getTemplate().getPod().getAffinity() != null) {
-            if (kafkaClusterSpec.getAffinity() != null) {
-                log.warn("Affinity given on both spec.kafka.affinity and spec.kafka.template.pod.affinity; latter takes precedence");
-            }
-            return kafkaClusterSpec.getTemplate().getPod().getAffinity();
-        } else {
-            return kafkaClusterSpec.getAffinity();
         }
     }
 
@@ -858,15 +834,19 @@ public class KafkaCluster extends AbstractModel {
                 if (loadBalancerIP != null) {
                     service.getSpec().setLoadBalancerIP(loadBalancerIP);
                 }
-            }
 
-            if (KafkaListenerType.LOADBALANCER == listener.getType()) {
                 List<String> loadBalancerSourceRanges = ListenersUtils.loadBalancerSourceRanges(listener);
                 if (loadBalancerSourceRanges != null
                         && !loadBalancerSourceRanges.isEmpty()) {
                     service.getSpec().setLoadBalancerSourceRanges(loadBalancerSourceRanges);
                 } else if (templateExternalBootstrapServiceLoadBalancerSourceRanges != null) {
                     service.getSpec().setLoadBalancerSourceRanges(templateExternalBootstrapServiceLoadBalancerSourceRanges);
+                }
+
+                List<String> finalizers = ListenersUtils.finalizers(listener);
+                if (finalizers != null
+                        && !finalizers.isEmpty()) {
+                    service.getMetadata().setFinalizers(finalizers);
                 }
             }
 
@@ -922,15 +902,19 @@ public class KafkaCluster extends AbstractModel {
                 if (loadBalancerIP != null) {
                     service.getSpec().setLoadBalancerIP(loadBalancerIP);
                 }
-            }
 
-            if (KafkaListenerType.LOADBALANCER == listener.getType()) {
                 List<String> loadBalancerSourceRanges = ListenersUtils.loadBalancerSourceRanges(listener);
                 if (loadBalancerSourceRanges != null
                         && !loadBalancerSourceRanges.isEmpty()) {
                     service.getSpec().setLoadBalancerSourceRanges(loadBalancerSourceRanges);
                 } else if (templatePerPodServiceLoadBalancerSourceRanges != null) {
                     service.getSpec().setLoadBalancerSourceRanges(templatePerPodServiceLoadBalancerSourceRanges);
+                }
+
+                List<String> finalizers = ListenersUtils.finalizers(listener);
+                if (finalizers != null
+                        && !finalizers.isEmpty()) {
+                    service.getMetadata().setFinalizers(finalizers);
                 }
             }
 

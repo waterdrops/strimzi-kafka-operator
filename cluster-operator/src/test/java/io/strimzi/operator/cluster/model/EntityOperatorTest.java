@@ -159,13 +159,6 @@ public class EntityOperatorTest {
     }
 
     @Test
-    public void withOldAffinityAndTolerations() throws IOException {
-        ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, VERSIONS, EntityOperator::fromCrd, this.getClass().getSimpleName() + ".withOldAffinityAndTolerations");
-        helper.assertDesiredResource("-DeploymentAffinity.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getAffinity());
-        helper.assertDesiredResource("-DeploymentTolerations.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getTolerations());
-    }
-
-    @Test
     public void withAffinityAndTolerations() throws IOException {
         ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, VERSIONS, EntityOperator::fromCrd, this.getClass().getSimpleName() + ".withAffinityAndTolerations");
         helper.assertDesiredResource("-DeploymentAffinity.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getAffinity());
@@ -895,7 +888,6 @@ public class EntityOperatorTest {
 
     @Test
     public void testRole() {
-
         Kafka resource = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
                 .editSpec()
                     .editOrNewEntityOperator()
@@ -904,7 +896,7 @@ public class EntityOperatorTest {
                 .build();
 
         EntityOperator eo =  EntityOperator.fromCrd(resource, VERSIONS);
-        Role role = eo.generateRole(namespace);
+        Role role = eo.generateRole(namespace, namespace);
 
         assertThat(role.getMetadata().getName(), is("foo-entity-operator"));
         assertThat(role.getMetadata().getNamespace(), is(namespace));
@@ -926,5 +918,23 @@ public class EntityOperatorTest {
                 .addToApiGroups("")
                 .build());
         assertThat(role.getRules(), is(rules));
+    }
+
+    @Test
+    public void testRoleInDifferentNamespace() {
+        Kafka resource = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                .editOrNewEntityOperator()
+                .endEntityOperator()
+                .endSpec()
+                .build();
+
+        EntityOperator eo =  EntityOperator.fromCrd(resource, VERSIONS);
+        Role role = eo.generateRole(namespace, namespace);
+
+        assertThat(role.getMetadata().getOwnerReferences().get(0), is(entityOperator.createOwnerReference()));
+
+        role = eo.generateRole(namespace, "some-other-namespace");
+        assertThat(role.getMetadata().getOwnerReferences().size(), is(0));
     }
 }

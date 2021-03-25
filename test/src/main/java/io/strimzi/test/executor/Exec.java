@@ -163,17 +163,21 @@ public class Exec {
             Exec executor = new Exec();
             ret = executor.execute(input, command, timeout);
             synchronized (LOCK) {
-                if (logToOutput) {
-                    LOGGER.info("Command: {}", String.join(" ", command));
+                if (logToOutput || ret != 0) {
+                    String log = ret != 0 ? "Failed to exec command" : "Command";
+                    LOGGER.info("{}: {}", log, String.join(" ", command));
+                    if (input != null && !input.contains("CusomResourceDefinition")) {
+                        LOGGER.info("Input: {}", input.trim());
+                    }
                     LOGGER.info("RETURN code: {}", ret);
                     if (!executor.out().isEmpty()) {
                         LOGGER.info("======STDOUT START=======");
-                        LOGGER.info("{}", cutExecutorLog(executor.out()));
+                        LOGGER.info("{}", cutExecutorLog(executor.out().trim()));
                         LOGGER.info("======STDOUT END======");
                     }
                     if (!executor.err().isEmpty()) {
                         LOGGER.info("======STDERR START=======");
-                        LOGGER.info("{}", cutExecutorLog(executor.err()));
+                        LOGGER.info("{}", cutExecutorLog(executor.err().trim()));
                         LOGGER.info("======STDERR END======");
                     }
                 }

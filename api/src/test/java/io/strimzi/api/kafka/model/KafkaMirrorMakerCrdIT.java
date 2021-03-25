@@ -8,8 +8,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.k8s.exceptions.KubeClusterException;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -23,60 +26,54 @@ public class KafkaMirrorMakerCrdIT extends AbstractCrdIT {
     public static final String NAMESPACE = "kafkamirrormaker-crd-it";
 
     @Test
-    void testKafkaMirrorMakerV1alpha1() {
-        assumeKube1_11Plus();
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMakerV1alpha1.yaml");
-    }
-
-    @Test
     void testKafkaMirrorMakerScaling() {
         createScaleDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker.yaml");
     }
 
     @Test
-    void testKafkaMirrorMakerV1beta1() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMakerV1beta1.yaml");
-    }
-
-    @Test
     void testKafkaMirrorMakerMinimal() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-minimal.yaml");
+        createDeleteCustomResource("KafkaMirrorMaker-minimal.yaml");
     }
 
+    @Disabled("See https://github.com/strimzi/strimzi-kafka-operator/issues/4606")
     @Test
-    void testKafkaMirrorMakerWithExtraProperty() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-extra-property.yaml");
+    void testCreateKafkaMirrorMakerWithExtraProperty() {
+        Throwable exception = assertThrows(
+            KubeClusterException.class,
+            () -> createDeleteCustomResource("KafkaMirrorMaker-with-extra-property.yaml"));
+
+        assertThat(exception.getMessage(), containsString("unknown field \"extra\""));
     }
 
     @Test
     void testKafkaMirrorMakerWithMissingRequired() {
         Throwable exception = assertThrows(
-            KubeClusterException.InvalidResource.class,
+            KubeClusterException.class,
             () -> {
-                createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-missing-required-property.yaml");
+                createDeleteCustomResource("KafkaMirrorMaker-with-missing-required-property.yaml");
             });
 
         assertMissingRequiredPropertiesMessage(exception.getMessage(),
-                "spec.consumer.bootstrapServers",
-                "spec.producer",
-                "spec.whitelist");
+                "bootstrapServers",
+                "producer",
+                "whitelist");
     }
 
     @Test
     void testKafkaMirrorMakerWithTls() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-tls.yaml");
+        createDeleteCustomResource("KafkaMirrorMaker-with-tls.yaml");
     }
 
     @Test
     void testKafkaMirrorMakerWithTlsAuth() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-tls-auth.yaml");
+        createDeleteCustomResource("KafkaMirrorMaker-with-tls-auth.yaml");
     }
 
     @Test
     void testKafkaMirrorMakerWithTlsAuthWithMissingRequired() {
         Throwable exception = assertThrows(
             KubeClusterException.InvalidResource.class,
-            () -> createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-tls-auth-with-missing-required.yaml"));
+            () -> createDeleteCustomResource("KafkaMirrorMaker-with-tls-auth-with-missing-required.yaml"));
 
         assertMissingRequiredPropertiesMessage(exception.getMessage(),
                 "spec.producer.authentication.certificateAndKey.certificate",
@@ -86,17 +83,17 @@ public class KafkaMirrorMakerCrdIT extends AbstractCrdIT {
 
     @Test
     void testKafkaMirrorMakerWithScramSha512Auth() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-scram-sha-512-auth.yaml");
+        createDeleteCustomResource("KafkaMirrorMaker-with-scram-sha-512-auth.yaml");
     }
 
     @Test
     void testKafkaMirrorMakerWithTemplate() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-template.yaml");
+        createDeleteCustomResource("KafkaMirrorMaker-with-template.yaml");
     }
 
     @Test
     void testKafkaMirrorMakerWithCommitAndAbort() {
-        createDelete(KafkaMirrorMaker.class, "KafkaMirrorMaker-with-commit-and-abort.yaml");
+        createDeleteCustomResource("KafkaMirrorMaker-with-commit-and-abort.yaml");
     }
 
     @BeforeAll

@@ -54,17 +54,17 @@ public class KafkaConnectorUtils {
      * @param connectorName name of KafkaConnector
      * @param state desired state
      */
-    public static void waitForConnectorStatus(String connectorName, Enum<?>  state) {
+    public static boolean waitForConnectorStatus(String connectorName, Enum<?>  state) {
         KafkaConnector kafkaConnector = KafkaConnectorResource.kafkaConnectorClient().inNamespace(kubeClient().getNamespace()).withName(connectorName).get();
-        ResourceManager.waitForResourceStatus(KafkaConnectorResource.kafkaConnectorClient(), kafkaConnector, state);
+        return ResourceManager.waitForResourceStatus(KafkaConnectorResource.kafkaConnectorClient(), kafkaConnector, state);
     }
 
-    public static void waitForConnectorReady(String connectorName) {
-        waitForConnectorStatus(connectorName, Ready);
+    public static boolean waitForConnectorReady(String connectorName) {
+        return waitForConnectorStatus(connectorName, Ready);
     }
 
-    public static void waitForConnectorNotReady(String connectorName) {
-        waitForConnectorStatus(connectorName, NotReady);
+    public static boolean waitForConnectorNotReady(String connectorName) {
+        return waitForConnectorStatus(connectorName, NotReady);
     }
 
     public static String getCreatedConnectors(String connectPodName) {
@@ -125,5 +125,28 @@ public class KafkaConnectorUtils {
             ResourceOperation.getTimeoutForResourceReadiness(KafkaConnector.RESOURCE_KIND),
             () -> !oldConfig.equals(getConnectorConfig(podName, connectorName, apiUrl)));
         return getConnectorConfig(podName, connectorName, apiUrl);
+    }
+
+    /**
+     * Checks stability of Connector's spec on Connect API, which should be same like before changes
+     */
+    public static void waitForConnectorSpecFromConnectAPIStability(String podName, String connectorName, String oldSpec) {
+        int[] stableCounter = {0};
+
+        TestUtils.waitFor("Connector's spec will be stable", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_STATUS_TIMEOUT, () -> {
+            if (getConnectorSpecFromConnectAPI(podName, connectorName).equals(oldSpec)) {
+                stableCounter[0]++;
+                if (stableCounter[0] == Constants.GLOBAL_STABILITY_OFFSET_COUNT) {
+                    LOGGER.info("Connector's spec is stable for {} polls intervals", stableCounter[0]);
+                    return true;
+                }
+            } else {
+                LOGGER.info("Connector's spec is not stable. Going to set the counter to zero.");
+                stableCounter[0] = 0;
+                return false;
+            }
+            LOGGER.info("Connector's spec gonna be stable in {} polls", Constants.GLOBAL_STABILITY_OFFSET_COUNT - stableCounter[0]);
+            return false;
+        });
     }
 }

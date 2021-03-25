@@ -162,8 +162,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final String operatorNamespace;
     private final Labels operatorNamespaceLabels;
 
-    private final ClusterOperatorConfig.RbacScope rbacScope;
-
     private final ZookeeperSetOperator zkSetOperations;
     private final KafkaSetOperator kafkaSetOperations;
     private final RouteOperator routeOperations;
@@ -197,7 +195,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         this.operationTimeoutMs = config.getOperationTimeoutMs();
         this.operatorNamespace = config.getOperatorNamespace();
         this.operatorNamespaceLabels = config.getOperatorNamespaceLabels();
-        this.rbacScope = config.getRbacScope();
         this.routeOperations = supplier.routeOperations;
         this.zkSetOperations = supplier.zkSetOperations;
         this.kafkaSetOperations = supplier.kafkaSetOperations;
@@ -775,15 +772,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          *
          * @return  Future with the result of the rolling update
          */
-        @SuppressWarnings("deprecation")
         Future<Void> kafkaManualPodRollingUpdate(StatefulSet sts) {
             return podOperations.listAsync(namespace, kafkaCluster.getSelectorLabels())
                     .compose(pods -> {
                         List<String> podsToRoll = new ArrayList<>(0);
 
                         for (Pod pod : pods)    {
-                            if (Annotations.booleanAnnotation(pod, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE,
-                                    false, Annotations.ANNO_OP_STRIMZI_IO_MANUAL_ROLLING_UPDATE)) {
+                            if (Annotations.booleanAnnotation(pod, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE, false)) {
                                 podsToRoll.add(pod.getMetadata().getName());
                             }
                         }
@@ -811,14 +806,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          *
          * @return  Future with the result of the rolling update
          */
-        @SuppressWarnings("deprecation")
         Future<ReconciliationState> kafkaManualRollingUpdate() {
             Future<StatefulSet> futsts = kafkaSetOperations.getAsync(namespace, KafkaCluster.kafkaClusterName(name));
             if (futsts != null) {
                 return futsts.compose(sts -> {
                     if (sts != null) {
-                        if (Annotations.booleanAnnotation(sts, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE,
-                                false, Annotations.ANNO_OP_STRIMZI_IO_MANUAL_ROLLING_UPDATE)) {
+                        if (Annotations.booleanAnnotation(sts, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE, false)) {
                             // User trigger rolling update of the whole StatefulSet
                             return maybeRollKafka(sts, pod -> {
                                 if (pod == null) {
@@ -849,15 +842,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          *
          * @return  Future with the result of the rolling update
          */
-        @SuppressWarnings("deprecation")
         Future<Void> zkManualPodRollingUpdate(StatefulSet sts) {
             return podOperations.listAsync(namespace, zkCluster.getSelectorLabels())
                     .compose(pods -> {
                         List<String> podsToRoll = new ArrayList<>(0);
 
                         for (Pod pod : pods)    {
-                            if (Annotations.booleanAnnotation(pod, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE,
-                                    false, Annotations.ANNO_OP_STRIMZI_IO_MANUAL_ROLLING_UPDATE)) {
+                            if (Annotations.booleanAnnotation(pod, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE, false)) {
                                 podsToRoll.add(pod.getMetadata().getName());
                             }
                         }
@@ -885,14 +876,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          *
          * @return  Future with the result of the rolling update
          */
-        @SuppressWarnings("deprecation")
         Future<ReconciliationState> zkManualRollingUpdate() {
             Future<StatefulSet> futsts = zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name));
             if (futsts != null) {
                 return futsts.compose(sts -> {
                     if (sts != null) {
-                        if (Annotations.booleanAnnotation(sts, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE,
-                                false, Annotations.ANNO_OP_STRIMZI_IO_MANUAL_ROLLING_UPDATE)) {
+                        if (Annotations.booleanAnnotation(sts, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE, false)) {
                             // User trigger rolling update of the whole StatefulSet
                             return zkSetOperations.maybeRollingUpdate(sts, pod -> {
                                 log.debug("{}: Rolling Zookeeper pod {} due to manual rolling update",
@@ -2785,7 +2774,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * @param existingPvcsFuture    Future which will return a list of PVCs which actually exist
          * @return
          */
-        @SuppressWarnings("deprecation")
         Future<Void> maybeCleanPodAndPvc(StatefulSetOperator stsOperator, StatefulSet sts, List<PersistentVolumeClaim> desiredPvcs, Future<List<PersistentVolumeClaim>> existingPvcsFuture)  {
             if (sts != null) {
                 log.debug("{}: Considering manual cleaning of Pods for StatefulSet {}", reconciliation, sts.getMetadata().getName());
@@ -2797,8 +2785,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     Pod pod = podOperations.get(namespace, podName);
 
                     if (pod != null) {
-                        if (Annotations.booleanAnnotation(pod, AbstractScalableResourceOperator.ANNO_STRIMZI_IO_DELETE_POD_AND_PVC,
-                                false, AbstractScalableResourceOperator.ANNO_OP_STRIMZI_IO_DELETE_POD_AND_PVC)) {
+                        if (Annotations.booleanAnnotation(pod, AbstractScalableResourceOperator.ANNO_STRIMZI_IO_DELETE_POD_AND_PVC, false)) {
                             log.debug("{}: Pod and PVCs for {} should be deleted based on annotation", reconciliation, podName);
 
                             return existingPvcsFuture
@@ -3067,7 +3054,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         Future<ReconciliationState> entityOperatorRole() {
             final Role role;
             if (isEntityOperatorDeployed()) {
-                role = entityOperator.generateRole(namespace);
+                role = entityOperator.generateRole(namespace, namespace);
             } else {
                 role = null;
             }
@@ -3095,7 +3082,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 topicWatchedNamespaceFuture = roleOperations.reconcile(
                         topicWatchedNamespace,
                         EntityOperator.getRoleName(name),
-                        entityOperator.generateRole(topicWatchedNamespace));
+                        entityOperator.generateRole(namespace, topicWatchedNamespace));
             } else {
                 topicWatchedNamespaceFuture = Future.succeededFuture();
             }
@@ -3120,7 +3107,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 userWatchedNamespaceFuture = roleOperations.reconcile(
                         userWatchedNamespace,
                         EntityOperator.getRoleName(name),
-                        entityOperator.generateRole(userWatchedNamespace));
+                        entityOperator.generateRole(namespace, userWatchedNamespace));
             } else {
                 userWatchedNamespaceFuture = Future.succeededFuture();
             }

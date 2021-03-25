@@ -567,13 +567,6 @@ public class KafkaClusterTest {
     }
 
     @Test
-    public void withOldAffinityWithoutRack() throws IOException {
-        ResourceTester<Kafka, KafkaCluster> resourceTester = new ResourceTester<>(Kafka.class, VERSIONS, KafkaCluster::fromCrd, this.getClass().getSimpleName() + ".withOldAffinityWithoutRack");
-        resourceTester.assertDesiredResource("-STS.yaml",
-            kc -> kc.generateStatefulSet(true, null, null).getSpec().getTemplate().getSpec().getAffinity());
-    }
-
-    @Test
     public void withAffinityWithoutRack() throws IOException {
         ResourceTester<Kafka, KafkaCluster> resourceTester = new ResourceTester<>(Kafka.class, VERSIONS, KafkaCluster::fromCrd, this.getClass().getSimpleName() + ".withAffinityWithoutRack");
         resourceTester.assertDesiredResource("-STS.yaml",
@@ -583,13 +576,6 @@ public class KafkaClusterTest {
     @Test
     public void withRackWithoutAffinity() throws IOException {
         ResourceTester<Kafka, KafkaCluster> resourceTester = new ResourceTester<>(Kafka.class, VERSIONS, KafkaCluster::fromCrd, this.getClass().getSimpleName() + ".withRackWithoutAffinity");
-        resourceTester.assertDesiredResource("-STS.yaml",
-            kc -> kc.generateStatefulSet(true, null, null).getSpec().getTemplate().getSpec().getAffinity());
-    }
-
-    @Test
-    public void withRackAndOldAffinity() throws IOException {
-        ResourceTester<Kafka, KafkaCluster> resourceTester = new ResourceTester<>(Kafka.class, VERSIONS, KafkaCluster::fromCrd, this.getClass().getSimpleName() + ".withRackAndOldAffinity");
         resourceTester.assertDesiredResource("-STS.yaml",
             kc -> kc.generateStatefulSet(true, null, null).getSpec().getTemplate().getSpec().getAffinity());
     }
@@ -606,13 +592,6 @@ public class KafkaClusterTest {
         ResourceTester<Kafka, KafkaCluster> resourceTester = new ResourceTester<>(Kafka.class, VERSIONS, KafkaCluster::fromCrd, this.getClass().getSimpleName() + ".withRackAndAffinity");
         resourceTester.assertDesiredResource("-STS.yaml",
             kc -> kc.generateStatefulSet(true, null, null).getSpec().getTemplate().getSpec().getAffinity());
-    }
-
-    @Test
-    public void withOldTolerations() throws IOException {
-        ResourceTester<Kafka, KafkaCluster> resourceTester = new ResourceTester<>(Kafka.class, VERSIONS, KafkaCluster::fromCrd, this.getClass().getSimpleName() + ".withOldTolerations");
-        resourceTester.assertDesiredResource("-STS.yaml",
-            kc -> kc.generateStatefulSet(true, null, null).getSpec().getTemplate().getSpec().getTolerations());
     }
 
     @Test
@@ -831,6 +810,7 @@ public class KafkaClusterTest {
         // Check external bootstrap service
         Service ext = kc.generateExternalBootstrapServices().get(0);
         assertThat(ext.getMetadata().getName(), is(KafkaCluster.externalBootstrapServiceName(cluster)));
+        assertThat(ext.getMetadata().getFinalizers(), is(emptyList()));
         assertThat(ext.getSpec().getType(), is("LoadBalancer"));
         assertThat(ext.getSpec().getSelector(), is(kc.getSelectorLabels().toMap()));
         assertThat(ext.getSpec().getPorts(), is(Collections.singletonList(kc.createServicePort(ListenersUtils.BACKWARDS_COMPATIBLE_EXTERNAL_PORT_NAME, 9094, 9094, "TCP"))));
@@ -843,6 +823,7 @@ public class KafkaClusterTest {
         for (int i = 0; i < replicas; i++)  {
             Service srv = kc.generateExternalServices(i).get(0);
             assertThat(srv.getMetadata().getName(), is(KafkaCluster.externalServiceName(cluster, i)));
+            assertThat(srv.getMetadata().getFinalizers(), is(emptyList()));
             assertThat(srv.getSpec().getType(), is("LoadBalancer"));
             assertThat(srv.getSpec().getSelector().get(Labels.KUBERNETES_STATEFULSET_POD_LABEL), is(KafkaCluster.kafkaPodName(cluster, i)));
             assertThat(srv.getSpec().getPorts(), is(Collections.singletonList(kc.createServicePort(ListenersUtils.BACKWARDS_COMPATIBLE_EXTERNAL_PORT_NAME, 9094, 9094, "TCP"))));
@@ -1077,6 +1058,40 @@ public class KafkaClusterTest {
         }
     }
 
+    @Test
+    public void testFinalizersFromListener() {
+        List<String> finalizers = List.of("service.kubernetes.io/load-balancer-cleanup", "mydomain.io/my-custom-finalizer");
+
+        Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
+                image, healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, configuration, emptyMap()))
+                .editSpec()
+                    .editKafka()
+                        .withNewListeners()
+                            .addNewGenericKafkaListener()
+                                .withName("external")
+                                .withPort(9094)
+                                .withType(KafkaListenerType.LOADBALANCER)
+                                .withTls(true)
+                                .withNewConfiguration()
+                                    .withFinalizers(finalizers)
+                                .endConfiguration()
+                            .endGenericKafkaListener()
+                        .endListeners()
+                    .endKafka()
+                .endSpec()
+                .build();
+        KafkaCluster kc = KafkaCluster.fromCrd(kafkaAssembly, VERSIONS);
+
+        // Check external bootstrap service
+        Service ext = kc.generateExternalBootstrapServices().get(0);
+        assertThat(ext.getMetadata().getFinalizers(), is(finalizers));
+
+        // Check per pod services
+        for (int i = 0; i < replicas; i++)  {
+            Service srv = kc.generateExternalServices(i).get(0);
+            assertThat(srv.getMetadata().getFinalizers(), is(finalizers));
+        }
+    }
 
     @Test
     public void testLoadBalancerSourceRangeFromListener() {

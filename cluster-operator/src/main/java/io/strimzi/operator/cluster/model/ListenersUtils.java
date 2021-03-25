@@ -535,7 +535,21 @@ public class ListenersUtils {
         if (listener.getConfiguration() != null) {
             return listener.getConfiguration().getLoadBalancerSourceRanges();
         } else {
-            return Collections.emptyList();
+            return null;
+        }
+    }
+
+    /**
+     * Finds load balancer finalizers
+     *
+     * @param listener  Listener for which the load balancer finalizers should be found
+     * @return          Load Balancer finalizers or null if not specified
+     */
+    public static List<String> finalizers(GenericKafkaListener listener)    {
+        if (listener.getConfiguration() != null) {
+            return listener.getConfiguration().getFinalizers();
+        } else {
+            return null;
         }
     }
 

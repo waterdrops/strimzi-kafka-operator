@@ -8,6 +8,7 @@ import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.strimzi.api.kafka.model.CertAndKeySecretSource;
 import io.strimzi.api.kafka.model.CruiseControlSpec;
 import io.strimzi.api.kafka.model.KafkaAuthorization;
+import io.strimzi.api.kafka.model.KafkaAuthorizationCustom;
 import io.strimzi.api.kafka.model.KafkaAuthorizationKeycloak;
 import io.strimzi.api.kafka.model.KafkaAuthorizationOpa;
 import io.strimzi.api.kafka.model.KafkaAuthorizationSimple;
@@ -18,6 +19,7 @@ import io.strimzi.api.kafka.model.listener.KafkaListenerAuthentication;
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationOAuth;
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationScramSha512;
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerConfiguration;
 import io.strimzi.kafka.oauth.server.ServerConfig;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlConfigurationParameters;
 import io.strimzi.kafka.oauth.server.plain.ServerPlainConfig;
@@ -181,6 +183,7 @@ public class KafkaBrokerConfigurationBuilder {
             listeners.add(listenerName + "://0.0.0.0:" + port);
             advertisedListeners.add(String.format("%s://${STRIMZI_%s_ADVERTISED_HOSTNAME}:${STRIMZI_%s_ADVERTISED_PORT}", listenerName, envVarListenerName, envVarListenerName));
             configureAuthentication(listenerName, securityProtocol, listener.isTls(), listener.getAuth());
+            configureListener(listenerName, listener.getConfiguration());
 
             if (listener.isTls())   {
                 CertAndKeySecretSource customServerCert = null;
@@ -233,6 +236,26 @@ public class KafkaBrokerConfigurationBuilder {
         writer.println("listener.name.replication-9091.ssl.truststore.type=PKCS12");
         writer.println("listener.name.replication-9091.ssl.client.auth=required");
         writer.println();
+    }
+
+    /**
+     * Configures the listener. This method is used only internally.
+     *
+     * @param listenerName  The name of the listener as it is referenced in the Kafka broker configuration file
+     * @param configuration The configuration of the listener (null if not specified by the user in the Kafka CR)
+     */
+    private void configureListener(String listenerName, GenericKafkaListenerConfiguration configuration) {
+        if (configuration != null)  {
+            String listenerNameInProperty = listenerName.toLowerCase(Locale.ENGLISH);
+
+            if (configuration.getMaxConnections() != null)  {
+                writer.println(String.format("listener.name.%s.max.connections=%d", listenerNameInProperty, configuration.getMaxConnections()));
+            }
+
+            if (configuration.getMaxConnectionCreationRate() != null)  {
+                writer.println(String.format("listener.name.%s.max.connection.creation.rate=%d", listenerNameInProperty, configuration.getMaxConnectionCreationRate()));
+            }
+        }
     }
 
     /**
@@ -480,6 +503,14 @@ public class KafkaBrokerConfigurationBuilder {
             // User configured super users
             if (keycloakAuthz.getSuperUsers() != null && keycloakAuthz.getSuperUsers().size() > 0) {
                 superUsers.addAll(keycloakAuthz.getSuperUsers().stream().map(e -> String.format("User:%s", e)).collect(Collectors.toList()));
+            }
+        } else if (KafkaAuthorizationCustom.TYPE_CUSTOM.equals(authorization.getType())) {
+            KafkaAuthorizationCustom customAuthz = (KafkaAuthorizationCustom) authorization;
+            writer.println("authorizer.class.name=" + customAuthz.getAuthorizerClass());
+
+            // User configured super users
+            if (customAuthz.getSuperUsers() != null && customAuthz.getSuperUsers().size() > 0) {
+                superUsers.addAll(customAuthz.getSuperUsers().stream().map(e -> String.format("User:%s", e)).collect(Collectors.toList()));
             }
         }
     }

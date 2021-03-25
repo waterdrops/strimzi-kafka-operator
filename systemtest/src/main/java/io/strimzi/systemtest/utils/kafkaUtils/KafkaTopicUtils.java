@@ -108,17 +108,17 @@ public class KafkaTopicUtils {
      * @param topicName name of KafkaTopic
      * @param state desired state
      */
-    public static void waitForKafkaTopicStatus(String topicName, Enum<?>  state) {
+    public static boolean waitForKafkaTopicStatus(String topicName, Enum<?>  state) {
         KafkaTopic kafkaTopic = KafkaTopicResource.kafkaTopicClient().inNamespace(kubeClient().getNamespace()).withName(topicName).get();
-        ResourceManager.waitForResourceStatus(KafkaTopicResource.kafkaTopicClient(), kafkaTopic, state);
+        return ResourceManager.waitForResourceStatus(KafkaTopicResource.kafkaTopicClient(), kafkaTopic, state);
     }
 
-    public static void waitForKafkaTopicReady(String topicName) {
-        waitForKafkaTopicStatus(topicName, Ready);
+    public static boolean waitForKafkaTopicReady(String topicName) {
+        return waitForKafkaTopicStatus(topicName, Ready);
     }
 
-    public static void waitForKafkaTopicNotReady(String topicName) {
-        waitForKafkaTopicStatus(topicName, NotReady);
+    public static boolean waitForKafkaTopicNotReady(String topicName) {
+        return waitForKafkaTopicStatus(topicName, NotReady);
     }
 
     public static void waitForKafkaTopicsCount(int topicCount, String clusterName) {
@@ -127,5 +127,38 @@ public class KafkaTopicUtils {
             Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
             () -> KafkaCmdClient.listTopicsUsingPodCli(clusterName, 0).size() == topicCount);
         LOGGER.info("{} KafkaTopics were created", topicCount);
+    }
+
+    public static String describeTopicViaKafkaPod(String topicName, String kafkaPodName, String bootstrapServer) {
+        return cmdKubeClient().execInPod(kafkaPodName, "/bin/bash -c",
+            ".bin/kafka-topics.sh",
+            "--topic",
+            topicName,
+            "--describe",
+            "--bootstrap-server",
+            bootstrapServer)
+            .out();
+    }
+
+    public static void waitForKafkaTopicSpecStability(String topicName, String podName, String bootstrapServer) {
+        int[] stableCounter = {0};
+
+        String oldSpec = describeTopicViaKafkaPod(topicName, podName, bootstrapServer);
+
+        TestUtils.waitFor("KafkaTopic's spec will be stable", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_STATUS_TIMEOUT, () -> {
+            if (oldSpec.equals(describeTopicViaKafkaPod(topicName, podName, bootstrapServer))) {
+                stableCounter[0]++;
+                if (stableCounter[0] == Constants.GLOBAL_STABILITY_OFFSET_COUNT) {
+                    LOGGER.info("KafkaTopic's spec is stable for {} polls intervals", stableCounter[0]);
+                    return true;
+                }
+            } else {
+                LOGGER.info("KafkaTopic's spec is not stable. Going to set the counter to zero.");
+                stableCounter[0] = 0;
+                return false;
+            }
+            LOGGER.info("KafkaTopic's spec gonna be stable in {} polls", Constants.GLOBAL_STABILITY_OFFSET_COUNT - stableCounter[0]);
+            return false;
+        });
     }
 }

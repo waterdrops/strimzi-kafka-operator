@@ -23,7 +23,9 @@ import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.batch.Job;
 import io.fabric8.kubernetes.api.model.batch.JobList;
+import io.fabric8.kubernetes.api.model.batch.JobStatus;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRole;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.Role;
@@ -92,6 +94,11 @@ public class KubeClient {
 
     public Namespace getNamespace(String namespace) {
         return client.namespaces().withName(namespace).get();
+    }
+
+    public boolean namespaceExists(String namespace) {
+        return client.namespaces().list().getItems().stream().map(n -> n.getMetadata().getName())
+            .collect(Collectors.toList()).contains(namespace);
     }
 
     public void createNamespace(String name) {
@@ -188,10 +195,22 @@ public class KubeClient {
         return listPods(Collections.singletonMap(key, value));
     }
 
+    public List<Pod> listPods(String clusterName, String key, String value) {
+        return listPods(Collections.singletonMap(key, value)).stream()
+            .filter(pod -> pod.getMetadata().getName().startsWith(clusterName)).collect(Collectors.toList());
+    }
+
     public List<String> listPodNames(String key, String value) {
         return listPods(Collections.singletonMap(key, value)).stream()
                 .map(pod -> pod.getMetadata().getName())
                 .collect(Collectors.toList());
+    }
+
+    public List<String> listPodNames(String clusterName, String key, String value) {
+        return listPods(Collections.singletonMap(key, value)).stream()
+            .filter(pod -> pod.getMetadata().getName().startsWith(clusterName))
+            .map(pod -> pod.getMetadata().getName())
+            .collect(Collectors.toList());
     }
 
 
@@ -212,6 +231,15 @@ public class KubeClient {
         return listPods()
                 .stream().filter(p -> p.getMetadata().getName().startsWith(podNamePrefix))
                 .collect(Collectors.toList());
+    }
+
+    public List<Pod> listKafkaConnectS2IPods(String connectS2iClusterName) {
+        return listPods()
+            .stream().filter(p ->
+                p.getMetadata().getName().startsWith(connectS2iClusterName) &&
+                !p.getMetadata().getName().endsWith("-build") &&
+                !p.getMetadata().getName().endsWith("-deploy"))
+            .collect(Collectors.toList());
     }
 
     /**
@@ -316,8 +344,19 @@ public class KubeClient {
     }
 
     public String getDeploymentNameByPrefix(String namePrefix) {
+        List<Deployment> prefixDeployments = client.apps().deployments().inNamespace(getNamespace()).list().getItems().stream().filter(
+            rs -> rs.getMetadata().getName().startsWith(namePrefix)).collect(Collectors.toList());
+
+        if (prefixDeployments != null && prefixDeployments.size() > 0) {
+            return prefixDeployments.get(0).getMetadata().getName();
+        } else {
+            return null;
+        }
+    }
+
+    public String getDeploymentBySubstring(String subString) {
         return client.apps().deployments().inNamespace(getNamespace()).list().getItems().stream()
-                .filter(rs -> rs.getMetadata().getName().startsWith(namePrefix)).collect(Collectors.toList()).get(0).getMetadata().getName();
+            .filter(rs -> rs.getMetadata().getName().contains(subString)).collect(Collectors.toList()).get(0).getMetadata().getName();
     }
     /**
      * Gets deployment UID
@@ -442,8 +481,17 @@ public class KubeClient {
         return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get();
     }
 
-    public Boolean getJobStatus(String jobName) {
-        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get().getStatus().getSucceeded().equals(1);
+    public Boolean checkSucceededJobStatus(String jobName) {
+        return checkSucceededJobStatus(jobName, 1);
+    }
+
+    public Boolean checkSucceededJobStatus(String jobName, int expectedSucceededPods) {
+        return getJobStatus(jobName).getSucceeded().equals(expectedSucceededPods);
+    }
+
+    // Pods Statuses:  0 Running / 0 Succeeded / 1 Failed
+    public JobStatus getJobStatus(String jobName) {
+        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get().getStatus();
     }
 
     public JobList getJobList() {
@@ -571,7 +619,12 @@ public class KubeClient {
 
     public List<Event> listEvents(String resourceUid) {
         return listEvents().stream()
-                .filter(event -> event.getInvolvedObject().getUid().equals(resourceUid))
+                .filter(event -> {
+                    if (event.getInvolvedObject().getUid() == null) {
+                        return false;
+                    }
+                    return event.getInvolvedObject().getUid().equals(resourceUid);
+                })
                 .collect(Collectors.toList());
     }
 
@@ -603,8 +656,20 @@ public class KubeClient {
         return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).delete(clusterRoleBinding);
     }
 
+    public ClusterRoleBinding getClusterRoleBinding(String name) {
+        return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).withName(name).get();
+    }
+
     public List<RoleBinding> listRoleBindings() {
         return client.rbac().roleBindings().list().getItems();
+    }
+
+    public RoleBinding getRoleBinding(String name) {
+        return client.rbac().roleBindings().inNamespace(getNamespace()).withName(name).get();
+    }
+
+    public void deleteRoleBinding(String name) {
+        client.rbac().roleBindings().inNamespace(getNamespace()).withName(name).delete();
     }
 
     public <T extends HasMetadata, L extends KubernetesResourceList<T>> MixedOperation<T, L, Resource<T>> customResources(CustomResourceDefinitionContext crdContext, Class<T> resourceType, Class<L> listClass) {
@@ -644,6 +709,24 @@ public class KubeClient {
             execLatch.countDown();
         }
     }
+
+    // ====================================
+    // ---------> NETWORK POLICY <---------
+    // ====================================
+
+    public NetworkPolicy getNetworkPolicy(String name) {
+        return client.network().networkPolicies().inNamespace(getNamespace()).withName(name).get();
+    }
+
+    public NetworkPolicy createNetworkPolicy(NetworkPolicy networkPolicy) {
+        return client.network().networkPolicies().inNamespace(getNamespace()).createOrReplace(networkPolicy);
+    }
+
+    public void deleteNetworkPolicy(String name) {
+        client.network().networkPolicies().inNamespace(getNamespace()).withName(name).delete();
+    }
+
+
 
     // ======================================
     // ---------> CLUSTER SPECIFIC <---------

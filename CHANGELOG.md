@@ -1,6 +1,25 @@
 
 # CHANGELOG
 
+## 0.23.0
+
+* Make it possible to configure maximum number of connections and maximum connection creation rate in listener configuration
+* Add support for configuring finalizers for `loadbalancer` type listeners
+* Remove support for Kafka 2.5.x
+* Use dedicated Service Account for Kafka Connect Build on Kubernetes 
+* Remove direct ZooKeeper access for handling user quotas in the User Operator. Add usage of Admin Client API instead.
+* Migrate to CRD v1 (required by Kubernetes 1.22+)
+* Support for configuring custom Authorizer implementation 
+
+### Changes, deprecations and removals
+
+* Strimzi API versions `v1alpha1` and `v1beta1` were removed from all Strimzi custom resources apart from `KafkaTopic` and `KafkaUser` (use `v1beta2` versions instead)
+* The following annotations have been removed and cannot be used anymore:
+  * `cluster.operator.strimzi.io/delete-claim` (used internally only - replaced by `strimzi.io/delete-claim`)
+  * `operator.strimzi.io/generation` (used internally only - replaced by `strimzi.io/generation`)
+  * `operator.strimzi.io/delete-pod-and-pvc` (use `strimzi.io/delete-pod-and-pvc` instead)
+  * `operator.strimzi.io/manual-rolling-update` (use `strimzi.io/manual-rolling-update` instead)
+
 ## 0.22.0
 
 * Add `v1beta2` version for all resources. `v1beta2` removes all deprecated fields.

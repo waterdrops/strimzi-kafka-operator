@@ -38,11 +38,15 @@ public interface KubeCmdClient<K extends KubeCmdClient<K>> {
     /** Creates the resources in the given files. */
     K create(File... files);
 
+    K create(File file);
+
     /** Creates the resources in the given files. */
     K apply(File... files);
 
     /** Deletes the resources in the given files. */
     K delete(File... files);
+
+    K createOrReplace(File file);
 
     default K create(String... files) {
         return create(asList(files).stream().map(File::new).collect(toList()).toArray(new File[0]));
